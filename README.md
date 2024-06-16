@@ -11,5 +11,5 @@ Current features:
 - Stompable enemies with basic AI (chase the player)
 
 TO-DO:
-- [] Fix issue in which ground collision does not work when hitting low objects
-- [] Multi-screen support
+- [ ] Fix issue in which ground collision does not work when hitting low objects
+- [ ] Multi-screen support
