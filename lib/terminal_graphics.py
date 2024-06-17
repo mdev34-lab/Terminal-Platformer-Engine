@@ -48,3 +48,7 @@ class Terminal:
             Terminal.move_cursor(key.xpos + 1, key.ypos + 1)  # +1 to account for 1-indexed cursor positions
             sys.stdout.write(value)
             sys.stdout.flush()
+    
+    @staticmethod
+    def place_sprite(sd: ScreenData, sprite: str, pos: Coords): # Function created for readability
+        sd.update({pos: sprite}) # Place the sprite at the given position

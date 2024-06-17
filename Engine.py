@@ -3,133 +3,216 @@ import threading
 from dataclasses import dataclass
 from lib.terminal_graphics import Terminal, ScreenData, Coords
 from lib.sprites import Sprites
+from lib.parameters import MagicNumbers
 import keyboard
-
-GROUND_WIDTH = 80
 
 class Ground():
     def __init__(self, screen: ScreenData, width: int, pos: Coords):
-        super().__init__()
+        super().__init__() # I don't know why this is here, but it's behavior looks good to me
         self.width = width
-        self.sprite = Sprites.GROUND_SPRITE * self.width
         self.pos = pos
-        self.xpos = pos.xpos
-        self.ypos = pos.ypos
+        self.xpos = pos.xpos # xpos short for X position
+        self.ypos = pos.ypos # ypos short for Y position
         self.screen = screen
+
+    def place_ground(self, xpos: int, ypos: int):
+        """Place a ground block in each coordinate.
+
+        Args:
+            xpos (int): The x position of the ground block.
+            ypos (int): The y position of the ground block.
+        
+        Returns:
+            None"""
+        # Place a ground block in each coordinate, reads as the following:
+        # For each number in the range of the width:                        <--+
+        #   Place a ground block in coordnates:                                | number
+        #       X = Ground's root x position + the number from the for loop ---+
+        for number in range(self.width):
+            Terminal.place_sprite(
+                self.screen,
+                Sprites.GROUND_SPRITE,
+                Coords(xpos + number, ypos)
+            )
+    
+    def get_collision_coords(self):
+        """
+        Get the coordinates for collision detection with the ground.
+        
+        Returns:
+            List[Coords]: A list of coordinates representing the ground.
+        """
+        # Initialize an empty list to hold the collision coordinates
+        collision_coords = []
+        
+        # Iterate over the range of the width
+        for number in range(self.width):
+            # Calculate the x coordinate for each number and add it to the list
+            # The x coordinate is the ground's root x position plus the number
+            collision_coords.append(Coords(self.xpos + number, self.ypos))
+        
+        # Return the list of collision coordinates
+        return collision_coords
     
     def render(self):
-        for i in range(self.width):
-            self.screen[Coords(self.xpos + i, self.ypos)] = Sprites.GROUND_SPRITE
-        collision_coords = [Coords(self.xpos + i, self.ypos) for i in range(self.width)]
+        # Place ground tiles on the screen
+        self.place_ground(self.xpos, self.ypos)
+        collision_coords = self.get_collision_coords()
+        
         return self.screen, collision_coords
 
-class Coin():
+# Please note that refactoring the other classes to inherit from another thing may be
+# bad for the program length, despite doing the exact same thing.
+class Coin(): # Also known as the Mother of All Objects
     def __init__(self, screen: ScreenData, pos: Coords):
+        # Initialize the position of the coin
         self.pos = pos
+        # Initialize the position of the coin one row above the current position
         self.secondary_pos = Coords(pos.xpos, pos.ypos - 1)
+        # Initialize the screen to render the coin on
         self.screen = screen
+        # Initialize a flag to indicate if the coin is hidden
         self.hide = False
+        # Initialize a flag to indicate if the coin has been broken
         self.broken = False
+        # Initialize a flag to indicate if the coin has been updated
         self.updated = False
+        # Initialize a flag to indicate if the coin has been killed
         self.killed = False
 
-    def hide_coin(self):
-        self.hide = True
-
-    def __del__(self):
-        if not self.updated:
-            self.screen[self.pos] = ' '  # Clear the coin's position from the screen
-            self.updated = True
-            self.broken, self.killed = True, True
-        else: pass
+    def hide_coin(self): self.hide = True
+    # R.I.P __del__() dunder method, didn't even get used in the 1st place
 
     def render(self, previous_pos: Coords = None):
-        new_screen: ScreenData = {
-            self.pos: Sprites.COIN_SPRITE if not self.hide else ' '  # 'C' represents the coin
-        }
-        self.screen.update(new_screen)
+        # Determine the sprite to render based on the hide flag
+        sprite_to_render = Sprites.COIN_SPRITE if not self.hide else ' '
+        # Place the sprite on the screen at the current position
+        Terminal.place_sprite(self.screen, sprite_to_render, self.pos)
+        # Return the updated screen data
         return self.screen
 
 class Powerup(Coin):
     def render(self, previous_pos: Coords = None):
-        new_screen: ScreenData = {
-            self.pos: Sprites.POWERUP_BLOCK_SPRITE if not self.hide else Sprites.HIT_POWERUP_BLOCK_SPRITE  # '?' represents the powerup block
-        }
-        self.screen.update(new_screen)
+        # Determine the sprite to render based on the hide flag
+        if self.hide: sprite_to_render = Sprites.HIT_POWERUP_BLOCK_SPRITE # Hide block has been hit
+        else: sprite_to_render = Sprites.POWERUP_BLOCK_SPRITE # Hide block has not been hit
+        # If hide flag is in an unknown state
+        if sprite_to_render is None: sprite_to_render = Sprites.UNKNOWN_BLOCK_SPRITE # This should never happen but just in case
+        
+        # Render the sprite on the screen at the current position
+        Terminal.place_sprite(self.screen, sprite_to_render, self.pos)
+        # Return the updated screen data
         return self.screen
     
 class StompableEnemy(Coin):
     def __init__(self, screen: ScreenData, pos: Coords):
+        # Call the __init__ method of the parent class (Coin)
+        # Pass in the screen and position arguments
         super().__init__(screen, pos)
+        # Set the killed flag to False
         self.killed = False
-        self.sidepos = (
-            Coords(pos.xpos - 1, pos.ypos),
-            Coords(pos.xpos + 1, pos.ypos),
-        )
+        
+        # Create a tuple of Coords objects representing the enemy's sides
+        # These Coords objects are one space to the left and right of the enemy's current position
+        
+        # Create a Coords object representing the enemy's secondary position
+        # This is the enemy's position one row above its current position
         self.secondary_pos = Coords(pos.xpos, pos.ypos - 1)
+        
+        # Store the previous position of the enemy
         self.previous_pos = pos
 
     def move_towards_player(self, player_pos: Coords):
-        if self.killed:
-            return  # Do not move if the enemy is killed
+        if self.killed: return  # Do not move if the enemy is killed
 
+        new_xpos = self.calculate_new_xpos(player_pos) # Calculate the new position of the enemy
+        new_ypos = self.pos.ypos
+
+        self.previous_pos = self.pos
+        self.pos = Coords(new_xpos, new_ypos)
+        self.sidepos = self.get_side_positions(self.pos)
+        self.secondary_pos = Coords(new_xpos, new_ypos - 1)
+    
+    def render(self):
+        # Determine the sprite to render based on the hide/kill flags
+        sprite_to_use = Sprites.ENEMY1_SPRITE if (not self.hide) or (not self.killed) else ' '
+
+        # Render the enemy on the screen at its current position
+        Terminal.place_sprite(self.screen, sprite_to_use, self.pos)
+        
+        # If the enemy has moved to a new position, clear its previous position
+        if self.previous_pos != self.pos:
+            Terminal.place_sprite(self.screen, ' ', self.previous_pos)
+        # If the enemy is hidden or killed, clear its current position
+        if self.hide or self.killed: Terminal.place_sprite(self.screen, ' ', self.pos)
+                
+        # Return the updated screen data
+        return self.screen
+    
+    def get_side_positions(self, pos: Coords):
+        sidepos = (
+            Coords(pos.xpos - 1, pos.ypos),  # Left side
+            Coords(pos.xpos + 1, pos.ypos),  # Right side
+        )
+        return sidepos
+    
+    def calculate_new_xpos(self, player_pos: Coords):
+        # Calculate the new position of the enemy
+        # If the enemy is on the left side of the player, move it to the right
+        # If the enemy is on the right side of the player, move it to the left
+        # If the enemy is already at the player's position, keep its position
         new_xpos = self.pos.xpos
         if self.pos.xpos < player_pos.xpos:
             new_xpos += 1
         elif self.pos.xpos > player_pos.xpos:
             new_xpos -= 1
-        
-        new_ypos = self.pos.ypos
-        self.previous_pos = self.pos
-        self.pos = Coords(new_xpos, new_ypos)
-        self.sidepos = (
-            Coords(new_xpos - 1, new_ypos),
-            Coords(new_xpos + 1, new_ypos),
-        )
-        self.secondary_pos = Coords(new_xpos, new_ypos - 1)
-    
-    def render(self, previous_pos: Coords = None):
-        new_screen: ScreenData = {}
-
-        if not self.hide:
-            new_screen[self.pos] = Sprites.ENEMY1_SPRITE
-            if self.previous_pos != self.pos:
-                new_screen[self.previous_pos] = ' '  # Clear the previous position
-        elif self.hide or self.killed:
-            if not self.updated:
-                new_screen[self.pos] = ' '
-                self.updated = True
-        self.screen.update(new_screen)
-        return self.screen
+        return new_xpos
     
 class Fireball(Coin):
     def __init__(self, screen: ScreenData, pos: Coords, direction: int, enemies: tuple[StompableEnemy]):
+        # Initialize the Fireball object with the necessary parameters
         super().__init__(screen, pos)
-        self.direction = direction  # Store the direction of the fireball
-        self.creation_time = time.time()  # Record the creation time of the fireball
+        # Store the direction of the fireball
+        self.direction = direction 
+        # Set the hit flag to False
         self.hit = False
-        self.old_pos = None  # Initialize old position as None
+        # Initialize old position as None
+        self.old_pos = None 
+        # Store the enemies that the fireball can collide with
         self.enemies = enemies
 
     def render(self, previous_pos: Coords = None):
-        new_screen: ScreenData = {}
-        if self.hit:
-            new_screen[self.pos] = ' '
-        elif not self.old_pos:
-            new_screen[self.pos] = Sprites.FIREBALL_RIGHT_SPRITE if self.direction == 1 else Sprites.FIREBALL_LEFT_SPRITE  # Render the fireball at its current position
-        elif self.pos != self.old_pos:
-            new_screen[self.pos] = Sprites.FIREBALL_RIGHT_SPRITE if self.direction == 1 else Sprites.FIREBALL_LEFT_SPRITE  # Render the fireball at its new position
-            new_screen[self.old_pos] = ' '  # Clear the fireball's previous position
-        if self.pos == self.old_pos: new_screen[self.pos] = ' '  # Clear the fireball's current position
-        if self.pos.xpos == 0: new_screen[self.pos] = ' '
-        if self.pos.xpos == (GROUND_WIDTH - 1): new_screen[self.pos] = ' '
+        # Render the fireball on the screen at its current position
+        Terminal.place_sprite(self.screen, Sprites.FIREBALL_RIGHT_SPRITE if self.direction == 1 else Sprites.FIREBALL_LEFT_SPRITE, self.pos)
+        
+        # If the fireball has hit something, clear its position
+        if self.hit: Terminal.place_sprite(self.screen, ' ', self.pos)
+
+        # If the fireball has moved to a new position, clear its previous position
+        elif self.old_pos and self.pos != self.old_pos:
+            Terminal.place_sprite(self.screen, ' ', self.old_pos)
+            Terminal.place_sprite(self.screen, Sprites.FIREBALL_RIGHT_SPRITE if self.direction == 1 else Sprites.FIREBALL_LEFT_SPRITE, self.pos)
+
+        # If the fireball is at its old position, clear its position
+        elif self.pos == self.old_pos:
+            Terminal.place_sprite(self.screen, ' ', self.pos)
+
+        # If the fireball is at the edge of the screen, clear its position
+        if self.pos.xpos == 0:
+            Terminal.place_sprite(self.screen, ' ', self.pos)
+        if self.pos.xpos == (MagicNumbers.GROUND_WIDTH - 1):
+            Terminal.place_sprite(self.screen, ' ', self.pos)
+
+        # Check for collisions with enemies
         for enemy in self.enemies:
             for pos in enemy.sidepos:
                 if (pos == self.pos) and (not enemy.killed):
                     self.hit = True
-                    new_screen[pos] = ' '
+                    enemy.killed = True
+                    Terminal.place_sprite(self.screen, ' ', enemy.pos)
+                    Terminal.place_sprite(self.screen, ' ', pos)
         
-        new_screen[Coords(5, 1)] = f'Last fireball position: {self.pos.xpos}, {self.pos.ypos}'
+        new_screen = {Coords(5, 1): f'Last fireball position: {self.pos.xpos}, {self.pos.ypos}'}
         self.screen.update(new_screen)
         return self.screen
 
@@ -143,30 +226,29 @@ class Fireball(Coin):
         self.pos = Coords(new_xpos, new_ypos)  # Create a new Coords instance with the updated position
         self.secondary_pos = Coords(new_xpos, new_ypos - 1)  # Update secondary position accordingly
 
-        # Check collision with ground border
-        if self.pos.xpos >= (GROUND_WIDTH) or self.pos.xpos < 0:
+        return self.ground_border_collision_check()
+    
+    def ground_border_collision_check(self):
+        if self.pos.xpos >= (MagicNumbers.GROUND_WIDTH) or self.pos.xpos < 0:
             self.screen[self.old_pos] = ' '  # Clear the character on the old position
             return True  # Indicate collision with ground border
-        return False  # Indicate no collision
-
-    def check_lifetime(self):
-        # Check if the fireball has existed for more than 3 seconds
-        return time.time() - self.creation_time > 3
+        return False
 
 class Brick(Coin):
     def render(self, previous_pos: Coords = None):
-        new_screen: ScreenData = {}
+        """
+        Render the brick on the screen at its current position.
+        """
+        # If the brick is not hidden, render it
         if not self.hide:
-            new_screen: ScreenData = {
-                self.pos: Sprites.BRICK_SPRITE
-            }
+            Terminal.place_sprite(self.screen, Sprites.BRICK_SPRITE, self.pos)
+        # If the brick is hidden or broken, clear its position
         elif self.hide or self.broken:
+            # If the brick has not been updated yet, clear its position
             if not self.updated:
-                new_screen: ScreenData = {
-                    self.pos: ' '
-                }
+                Terminal.place_sprite(self.screen, ' ', self.pos)
                 self.updated = True
-        self.screen.update(new_screen)
+        # Return the updated screen data
         return self.screen
 
 class Player():
@@ -198,7 +280,7 @@ class Player():
         for enemy in self.enemies: self.enemy_coords.append(enemy.pos)  
 
         self.coins_collected: int = 0
-        self.powerstate = 0
+        self.powerstate = MagicNumbers.STARTING_POWERSTATE
         self.fire_cooldown = 0
 
     class Left: pass
@@ -265,7 +347,8 @@ class Player():
                 if powcoord == Coords(self.pos.xpos, new_ypos):
                     new_ypos = self.pos.ypos + 1
                     self.velocity_y = 0
-                    self.powerstate += 1 if not self.powerups[id].hide else 0
+                    if (not self.powerups[id].hide) and (self.powerstate < 2):
+                        self.powerstate += 1
                     self.powerups[id].hide_coin()
         elif brick_collision:
             for id, brkcoord in enumerate(self.brick_coords):
@@ -334,7 +417,7 @@ class Player():
 def main():
     screen: ScreenData = {}
 
-    level_ground = Ground(screen, GROUND_WIDTH, Coords(0, 10))
+    level_ground = Ground(screen, MagicNumbers.GROUND_WIDTH, Coords(0, 10))
     screen.update(level_ground.render()[0])
 
     coins: tuple = (
