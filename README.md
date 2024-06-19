@@ -13,3 +13,4 @@ Current features:
 TO-DO:
 - [ ] Fix issue in which ground collision does not work when hitting low objects
 - [ ] Multi-screen support
+- [ ] Fix fireball collision with enemies
